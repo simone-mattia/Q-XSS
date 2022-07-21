@@ -95,6 +95,6 @@ class QLearning:
                 count_reset_state = 0
 
         if done:
-            return "\n[+] exploited, payload: {}".format(self.env.payload)
+            return "\n[+] exploited, payload: {}".format(self.env.xssExploit.payload())
         else:
             return "\n[-] not exploited"

