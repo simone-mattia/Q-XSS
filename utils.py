@@ -1,7 +1,6 @@
 import sys, getopt, validators, re
 
 USAGE="main.py -u <url> [-m <method>] -p <parameter>"
-MATCH_ALL = r'.*'
 
 # Check user parameters
 def checkParameters(argv):
@@ -57,11 +56,3 @@ def printBanner():
       \__/                                     
                                                                                 
  """)
-
-#Return a compiled regular expression that matches the given string with any prefix and postfix
-def buildRegex(string):
-    string_ = string
-    if not isinstance(string_, str):
-        string_ = str(string_)
-    regex = MATCH_ALL + re.escape(string_) + MATCH_ALL
-    return re.compile(regex, flags=re.DOTALL)

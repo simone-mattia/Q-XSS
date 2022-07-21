@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import enviroment, qlearning, utils
+import enviroment, qlearning, utils, xssExploit
 import sys
 
 
@@ -21,4 +21,6 @@ if __name__ == "__main__":
 
     # Start executions
     print("[*] Start training...")
-    print(qlearning.qLearning(10))
+    #print(qlearning.qLearning(10))
+    xssExploit = xssExploit.XssExploit()
+    
