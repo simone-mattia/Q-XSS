@@ -53,7 +53,7 @@ class QLearning:
             # Get probabilities of all actions from current state
             action_probabilities = self.policy(self.state)
 
-            # Choose action according to the probability distribution, except for the first action in a new state
+            # Choose action according to the probability distribution
             action = np.random.choice(np.arange(
                 len(action_probabilities)),
                 p = action_probabilities
@@ -61,28 +61,25 @@ class QLearning:
 
             # Take action and get reward, transit to next state
             old_state = self.state
-            self.state, reward, done = self.env.doAction(self.state, action)
+            self.state, reward, exit = self.env.doAction(self.state, action)
 
             # TD Update
             best_next_action = np.argmax(self.Q[self.state])	
             td_target = reward + self.gamma * self.Q[self.state][best_next_action]
             td_delta = td_target - self.Q[old_state][action]
             self.Q[old_state][action] += self.alpha * td_delta
-            
-            # Exploited
-            if done:
-                exit = True
 
             # Update counters
             count_actions += 1
             count_state_actions += 1
+
+            # Resets counters if the state changes
             if old_state != self.state:
                 count_state_actions = 0
                 count_reset_state = 0
-                continue
-
+                
             # Resets state after n_actions[state]*(2**attemps)
-            if count_state_actions == len(self.env.actions[self.state])*(2**count_reset_state):
+            elif count_state_actions == len(self.env.actions[self.state])*(2**count_reset_state):
                 print("\n[!] Reset payload after {} attemps".format(count_state_actions))
                 self.env.resetPayload(self.state)
                 count_state_actions = 0
@@ -94,7 +91,7 @@ class QLearning:
                 self.state, exit = self.env.goBack(self.state)
                 count_reset_state = 0
 
-        if done:
+        if exit:
             return "\n[+] exploited, payload: {}".format(self.env.xssExploit.payload())
         else:
             return "\n[-] not exploited"
