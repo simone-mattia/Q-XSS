@@ -23,8 +23,10 @@ class QLearning:
 
         # Initial state
         self.state=0
-
-
+    
+    def updateEnviroment(self, env):
+        self.env = env
+        
     # Creates an epsilon-greedy policy based a given Q-function and epsilon
     # Returns a function that takes the state as an input and returns the probabilities for each action in the set of possible actions.
     def createEpsilonGreedyPolicy(self):
@@ -45,7 +47,6 @@ class QLearning:
         count_actions = 0
         count_state_actions = 0
         count_reset_state = 0
-        done = False
         exit = False
 
         while count_actions != max_actions and not exit:

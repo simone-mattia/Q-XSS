@@ -6,7 +6,9 @@ USAGE="main.py -u <url> [-m <method>] -p <parameter>"
 def checkParameters(argv):
     
     # Default parameters
+    url = ""
     method="GET"
+    parameter = ""
 
     # Get and check parameters
     try:
@@ -20,7 +22,7 @@ def checkParameters(argv):
             sys.exit()
         elif opt in ("-u", "--url"):
             if not validators.url(arg):
-                print("[!] Url not valid")
+                print("[!] Not valid url")
                 sys.exit(1)
             else:
                 url = arg
@@ -34,10 +36,29 @@ def checkParameters(argv):
             parameter = arg
         
     # Required parameters
-    if url == "":
+    if url == "" and parameter == "" and method == "GET":
+        print("[?] Insert url: ")
+        url = input()
+        while not validators.url(url):
+            print("[!] Not valid url")
+            print("[?] Insert url: ")
+            url = input()
+        print("[?] Insert method: ")
+        method = input()
+        while method not in ("GET","POST","COOKIE"):
+            print("[!] Method not allowed")
+            print("[?] Insert method: ")
+            method = input()
+        print("[?] Insert parameter: ")
+        parameter = input()
+        while parameter == "":
+            print("[!] parameter is required")
+            print("[?] Insert parameter: ")
+            parameter = input()
+    elif url == "":
         print("[!] Url is required, usage: {}".format(USAGE))
         sys.exit(1)
-    if parameter == "":
+    elif parameter == "":
         print("[!] With {} method parameter is required, usage: main.py -u <url> -m {} -p <parameter>".format(method, method))
         sys.exit(1)
 

